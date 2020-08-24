@@ -52,7 +52,7 @@ def LoadWaveform(json, channel=1, discard_by_status=True, hide_starttime=False):
 
     if not hide_starttime:
         print("Start:         {}".format(starttime))
-    print("Duration:      {} s".format(duration))
+    print("Duration:      {: >10} s".format(duration))
     print("")
     print("Total samples: {: >10}      Discarded:   {: >5}".format(samplecount, discarded_samples))
     print("Sample rate:   {: >10} 1/s  Sample time: {: >5} μs".format(samplerate, sampletime))

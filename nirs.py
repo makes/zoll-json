@@ -8,15 +8,17 @@ def LoadCSV(filename):
                      na_values = '--',
                      parse_dates = ['Time'])
 
+    df.rename(columns={'rSO2 (%)': 'rSO2'}, inplace=True)
+
     with open (filename, "r") as fd:
         next(fd)
         startdate = next(fd).partition(',')[2].strip()
-        for i in range(4): next(fd)
+        for _ in range(4): next(fd)
         startdate = startdate + 'T' + next(fd).partition(',')[0].strip()
 
     timeindex = []
     time = pd.to_datetime(startdate)
-    for index, row in df.iterrows():
+    for _ in range(len(df.index)):
         timeindex.append(time)
         time = time + timedelta(seconds=1)
 
