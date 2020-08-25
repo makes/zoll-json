@@ -2,7 +2,7 @@
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 #                                                                                                           #
-#  This script will anonymize ZOLL and NIRS patient data.                                                   #
+#  This script will anonymize ZOLL and NIRS patient data for the BOPRA study.                               #
 #                                                                                                           #
 #  - All timestamps will be obfuscated by shifting them to distant past, while maintaining data integrity.  #
 #  - ZOLL startup time (DeviceConfiguration => DevDateTime) will be used as an anchor point for time shift. #
@@ -20,13 +20,14 @@ import argparse
 import json
 from datetime import datetime
 
-# ZOLL startup time will be shifted to this point. All other timestamps will be shifted by the same amount of time.
+# ZOLL startup time will be shifted to this point. All other timestamps will be shifted by the same offset.
 time_zero = '1990-01-01T00:00:00'
 
-format_string = '%Y-%m-%dT%H:%M:%S' # ISO 8601 time format is used by ZOLL.
-
+# ISO 8601 time format is used by ZOLL.
+format_string = '%Y-%m-%dT%H:%M:%S'
 t_zero = datetime.strptime(time_zero, format_string)
 
+# handle command line arguments
 arg_parser = argparse.ArgumentParser(description = "Anonymize patient data. Output files will have the suffix '_anon'.")
 arg_parser.add_argument("zoll_json_file")
 arg_parser.add_argument("nirs_csv_file")
@@ -52,30 +53,24 @@ except OSError:
     print("Could not open/read file:", nirs_file)
     sys.exit()
 
-def append_suffix(filename, suffix):
-    name, ext = os.path.splitext(filename)
-    return "{name}_{sfx}{ext}".format(name=name, sfx=suffix, ext=ext)
-
-def item_generator(json_input, lookup_key):
-    if isinstance(json_input, dict):
-        for k, v in json_input.items():
-            if k == lookup_key:
-                yield v
-            else:
-                yield from item_generator(v, lookup_key)
-    elif isinstance(json_input, list):
-        for item in json_input:
-            yield from item_generator(item, lookup_key)
-
-for item in item_generator(zoll_data, 'DeviceConfiguration'):
-    zoll_config = item
-
+# find ZOLL startup time in DeviceConfiguration
+zoll_config = None
+for item in zoll_data['ZOLL']['FullDisclosure'][0]['FullDisclosureRecord']:
+    if 'DeviceConfiguration' in item:
+        zoll_config = item['DeviceConfiguration']
+if not zoll_config:
+    print("DeviceConfiguration not found in ZOLL data file {f}".format(f=zoll_file))
+    sys.exit()
 zoll_starttime = datetime.strptime(zoll_config['StdHdr']['DevDateTime'], format_string)
+
+# calculate offset for time shift
 timeoffset = zoll_starttime - t_zero
 
+# ZOLL data processing
 def anonymize_zoll(json_input, offset):
     global n_modified
     timestamp_names = ['DevDateTime', 'StartTime', 'LastTreatmentTimeStamp']
+    # traverse JSON tree
     if isinstance(json_input, dict):
         for k, v in json_input.items():
             if k in timestamp_names:
@@ -93,21 +88,30 @@ def anonymize_zoll(json_input, offset):
         for item in json_input:
             anonymize_zoll(item, offset)
 
+print("Processing ZOLL data")
+n_modified = 0
+anonymize_zoll(zoll_data, timeoffset)
+print("{n} timestamps modified.".format(n=n_modified))
+
+# NIRS data processing
 def anonymize_nirs(nirs_lines, offset):
     global n_modified
     # parse start timestamp
     nirs_startdate = nirs_lines[1].partition(',')[2].strip()
     nirs_starttime = nirs_lines[6].partition(',')[0].strip()
     nirs_start = datetime.strptime(nirs_startdate + 'T' + nirs_starttime, format_string)
+    # shift start date
     nirs_newstartdate = (nirs_start - offset).strftime("%Y-%m-%d")
     nirs_lines[1] = nirs_lines[1].split(',')[0] + ',' + nirs_newstartdate + '\n'
+
     nirs_date = nirs_startdate
     prev = None
     for i in range(len(nirs_lines)):
-        if i < 6: continue
+        if i < 6: continue # skip first six lines
         t = nirs_lines[i].partition(',')[0]
         dt = datetime.strptime(nirs_date + 'T' + t, format_string)
-        if prev is not None and dt < prev:  # handle midnight rollover
+        # TODO: unnecessary checks, simplify
+        if prev is not None and dt < prev: # handle midnight rollover
             dt += datetime.timedelta(days=1)
             nirs_date = dt.strftime("%Y-%m-%d")
         prev = dt
@@ -115,15 +119,15 @@ def anonymize_nirs(nirs_lines, offset):
         nirs_lines[i] = shifted_dt.strftime("%H:%M:%S") + ',' + nirs_lines[i].split(',', 1)[1]
         n_modified += 1
 
-print("Processing ZOLL data")
-n_modified = 0
-anonymize_zoll(zoll_data, timeoffset)
-print("{n} timestamps modified.".format(n=n_modified))
-
 print("Processing NIRS data")
 n_modified = 0
 anonymize_nirs(nirs_data, timeoffset)
 print("{n} timestamps modified.".format(n=n_modified))
+
+# append suffix _anon to output filenames
+def append_suffix(filename, suffix):
+    name, ext = os.path.splitext(filename)
+    return "{name}_{sfx}{ext}".format(name=name, sfx=suffix, ext=ext)
 
 zoll_outfile = append_suffix(zoll_file, 'anon')
 nirs_outfile = append_suffix(nirs_file, 'anon')
@@ -144,3 +148,5 @@ try:
 except OSError:
     print("Could not open/write file:", nirs_outfile)
     sys.exit()
+
+print("Processing completed successfully.")
