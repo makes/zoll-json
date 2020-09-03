@@ -69,15 +69,19 @@ timeoffset = zoll_starttime - t_zero
 # ZOLL data processing
 def anonymize_zoll(json_input, offset):
     global n_modified
-    timestamp_names = ['DevDateTime', 'StartTime', 'LastTreatmentTimeStamp']
+    timestamp_names = ['DevDateTime', 'StartTime', 'LastTreatmentTimeStamp', 'Timestamp']
     # traverse JSON tree
     if isinstance(json_input, dict):
         for k, v in json_input.items():
             if k in timestamp_names:
                 # shift timestamp
-                newtime = datetime.strptime(v, format_string) - offset
-                json_input[k] = newtime.strftime(format_string)
-                n_modified += 1
+                try:
+                    newtime = datetime.strptime(v, format_string) - offset
+                    json_input[k] = newtime.strftime(format_string)
+                    n_modified += 1
+                except:
+                    # ignore millisecond format
+                    pass
             elif k == 'Age':
                 # clear patient age
                 json_input[k] = 0
